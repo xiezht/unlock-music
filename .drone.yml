@@ -7,34 +7,28 @@ clone:
   depth: 1
 
 steps:
-  - name: restore-cache
-    image: drillster/drone-volume-cache
-    volumes:
-      - name: cache
-        path: /cache
-    settings:
-      restore: true
-      mount:
-        - ./node_modules
-
   - name: installDependencies
     image: node:lts
     commands:
-      - npm config set registry http://registry.npm.taobao.org --global
-      - npm install
+      - npm ci --registry=https://registry.npm.taobao.org
 
   - name: build
     image: node:lts
     commands:
+      - npm run fix-compatibility
+      - npm run build
+      - tar -czf legacy.tar.gz -C ./dist .
       - npm run build -- --modern
-      - tar -czf dist.tar.gz ./dist/*
+      - tar -czf modern.tar.gz -C ./dist .
+
 
   - name: release
     image: plugins/gitea-release
     settings:
       base_url: https://git.ixarea.com
       files:
-        - dist.tar.gz
+        - modern.tar.gz
+        - legacy.tar.gz
       api_key:
         from_secret: gitea_token
       checksum:
@@ -51,20 +45,21 @@ steps:
       secret_key:
         from_secret: aws_secret_access_key
       source: dist/**/*
-      target: /
+      strip_prefix: dist/
+      target: /public
       path_style: true
       endpoint: https://fs.sz2.ixarea.com
 
-  - name: rebuild-cache
-    image: drillster/drone-volume-cache
-    volumes:
-      - name: cache
-        path: /cache
+
+  - name: upload
+    image: plugins/s3
     settings:
-      rebuild: true
-      mount:
-        - ./node_modules
-volumes:
-  - name: cache
-    host:
-      path: /tmp/cache
+      bucket: unlock-music
+      access_key:
+        from_secret: aws_access_key_id
+      secret_key:
+        from_secret: aws_secret_access_key
+      source: ./*.tar.gz
+      target: /build/${DRONE_BUILD_NUMBER}
+      path_style: true
+      endpoint: https://fs.sz2.ixarea.com
